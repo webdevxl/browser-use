@@ -1085,13 +1085,55 @@ class BrowserContext:
 
 			# Get element properties to determine input method
 			is_contenteditable = await element_handle.get_property('isContentEditable')
+			# Check if element is a textarea
+			tag_name = await element_handle.evaluate('el => el.tagName.toLowerCase()')
+			input_type = await element_handle.evaluate('el => el.type.toLowerCase()')
+			is_textarea = tag_name == 'textarea'
+			is_radio = input_type == 'radio'
 
+			# Different handling for contenteditable, textarea, and regular input fields
+			try:
+				if await is_contenteditable.json_value():
+					await element_handle.evaluate('el => el.textContent = ""')
+					await element_handle.type(text, delay=5)
+				elif is_textarea:
+					# For textareas, handle newlines explicitly
+					await element_handle.click()
+					await element_handle.press('Control+a')  # Select all existing text
+					await element_handle.press('Delete')     # Delete selected text
+					
+					# Split text by newlines and type with explicit Enter presses
+					lines = text.split('\\n')
+					for i, line in enumerate(lines):
+						if i > 0:  # Don't press Enter before the first line
+							await element_handle.press('Enter')
+						if line and line != '':  # Only type if there's content (avoid typing empty lines)
+							await element_handle.type(line, delay=5)
+				elif is_radio:
+					await element_handle.click()
+				else:
+					await element_handle.fill(text)
+			except Exception:
+				logger.debug('Could not type text into element. Trying to click and type.')
+				await element_handle.click()
+				
+				# If we're falling back to type() for any element, handle newlines properly
+				if ('\\n' in text) and is_textarea:
+					lines = text.split('\\n')
+					for i, line in enumerate(lines):
+						if i > 0:
+							await element_handle.press('Enter')
+						if line and line != '':
+							await element_handle.type(line, delay=5)
+				else:
+					await element_handle.type(text, delay=5)
 			# Different handling for contenteditable vs input fields
 			if await is_contenteditable.json_value():
 				await element_handle.evaluate('el => el.textContent = ""')
 				await element_handle.type(text, delay=5)
 			else:
-				await element_handle.fill(text)
+				if not is_textarea:
+					await element_handle.fill(text)
 
 		except Exception as e:
 			logger.debug(f'Failed to input text into element: {repr(element_node)}. Error: {str(e)}')
